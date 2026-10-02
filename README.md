@@ -11,6 +11,7 @@ The system stores document embeddings in a Chroma vector database, retrieves the
 ## Features
 
 - Natural-language Q&A over internal policy, HR, and technical documents
+- Document upload (.txt, .md, .pdf, .docx) from the chat widget — answers are grounded in uploaded files
 - RAG pipeline built with LangChain
 - Chroma vector store for semantic search and document retrieval
 - Flask REST API for chatbot requests
@@ -25,41 +26,46 @@ The system stores document embeddings in a Chroma vector database, retrieves the
 - Frontend: React, Axios, styled-components
 - RAG / LLM Orchestration: LangChain
 - Vector Database: Chroma
-- Embeddings: OpenAI embeddings
-- Language Model API: Provider-configurable setup for OpenAI, Gemini, or Claude
+- Embeddings: Google Gemini (`gemini-embedding-2-preview`)
+- Language Model API: Google Gemini (configurable via `GEMINI_MODEL`, default `gemini-3.5-flash-lite`)
 - Deployment: Gunicorn-ready Flask API
 
 ## Project Structure
 
 ```text
 .
-├── app.py
+├── app.py                  # Flask app + API routes (/, /data, /upload)
 ├── requirements.txt
 ├── setup.py
+├── tests.py                # API test suite
+├── .env                    # GOOGLE_API_KEY / GEMINI_MODEL (you create this)
+├── sample_docs/            # sample .txt/.pdf/.docx files to try the upload feature
+├── database/               # Chroma vector store (created automatically)
 ├── src
 │   ├── components
-│   │   └── chatbot.py
+│   │   └── chatbot.py      # Gemini chatbot + conversation chain
 │   ├── exception.py
 │   ├── logger.py
-│   └── utils.py
+│   └── utils.py            # embeddings, retrieval, document ingestion
 └── frontend
     ├── public
     └── src
         ├── App.js
         ├── index.js
         └── components
-            └── chatbot.js
+            └── chatbot.js  # chat widget with the 📎 upload button
 ```
 
 ## How It Works
 
-1. A user submits a question from the React chat widget.
-2. The frontend sends the query to the Flask `/data` endpoint.
-3. The backend refines the query using the conversation history.
-4. Relevant text is retrieved from the Chroma vector store.
-5. LangChain builds a prompt with the retrieved context and user query.
-6. The language model generates a response for the user.
-7. The frontend displays the chatbot response in the chat window.
+1. (Optional) A user uploads a document with the 📎 button; the backend extracts its text, chunks it, and stores the embeddings in Chroma.
+2. A user submits a question from the React chat widget.
+3. The frontend sends the query to the Flask `/data` endpoint.
+4. The backend refines the query using the conversation history.
+5. Relevant text is retrieved from the Chroma vector store.
+6. LangChain builds a prompt with the retrieved context and user query.
+7. The language model generates a response for the user.
+8. The frontend displays the chatbot response in the chat window.
 
 ## Setup
 
@@ -67,7 +73,7 @@ The system stores document embeddings in a Chroma vector database, retrieves the
 
 ```bash
 git clone <repository-url>
-cd chatbot-langchain-flask-main
+cd <repository-folder>
 ```
 
 ### 2. Create a Virtual Environment
@@ -95,10 +101,11 @@ pip install -r requirements.txt
 Create a `.env` file in the project root:
 
 ```env
-OPENAI_API_KEY=your_api_key_here
+GOOGLE_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
 ```
 
-If using Gemini or Claude instead of OpenAI, update the model initialization in the LangChain chatbot component and set the matching provider key in the environment.
+`GEMINI_API_KEY` is also accepted as a fallback variable name. You can get a key from Google AI Studio. `GEMINI_MODEL` is optional and defaults to `gemini-3.5-flash-lite` (free-tier daily quotas are tracked per model, so you can switch models here if you hit one).
 
 ### 5. Run the Flask Backend
 
@@ -124,6 +131,14 @@ The frontend runs on:
 
 ```text
 http://localhost:3000
+```
+
+### 7. Run the Tests
+
+With the backend dependencies installed (these call the Gemini API):
+
+```bash
+python -m unittest tests
 ```
 
 ## API Endpoints
@@ -159,6 +174,23 @@ Response body:
 }
 ```
 
+### Document Upload
+
+```http
+POST /upload
+```
+
+Multipart form body with a `file` field. Supported types: `.txt`, `.md`, `.pdf`, `.docx`. The file is text-extracted, chunked, and stored in the Chroma knowledge base so the chatbot can answer questions about it.
+
+Response body:
+
+```json
+{
+  "response": true,
+  "message": "Added 'leave_policy.pdf' (4 chunks) to the knowledge base. Ask me anything about it!"
+}
+```
+
 ## Example Use Cases
 
 - Employees asking about HR policies and benefits
@@ -170,8 +202,7 @@ Response body:
 
 - Improve source citation formatting in the response payload
 - Add authentication for internal users
-- Support file upload and document ingestion from the UI
-- Add role-based document access
+- Support role-based document access
 - Add streaming responses for a smoother chat experience
 - Add production deployment configuration
 
