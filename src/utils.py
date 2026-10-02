@@ -1,29 +1,58 @@
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import SentenceTransformersTokenTextSplitter as ss
-from langchain.vectorstores.chroma import Chroma
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_community.vectorstores.chroma import Chroma
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from src.logger import logging
-import openai
 from dotenv.main import load_dotenv
 import os
+import io
 load_dotenv()
 
 
-openai.api_key=os.getenv('OPENAI_API_KEY')
+SUPPORTED_EXTENSIONS=('.txt', '.md', '.pdf', '.docx')
+
+def extract_text(file_storage, ext):
+    """Extract plain text from an uploaded file based on its extension."""
+    data=file_storage.read()
+    if ext in ('.txt', '.md'):
+        return data.decode('utf-8', errors='ignore')
+    if ext == '.pdf':
+        from pypdf import PdfReader
+        reader=PdfReader(io.BytesIO(data))
+        return "\n".join(page.extract_text() or '' for page in reader.pages)
+    if ext == '.docx':
+        import docx
+        document=docx.Document(io.BytesIO(data))
+        parts=[p.text for p in document.paragraphs]
+        parts+= [cell.text for table in document.tables for row in table.rows for cell in row.cells]
+        return "\n".join(parts)
+    raise ValueError(f"Unsupported file type '{ext}'. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
+
+
+google_api_key=os.getenv('GOOGLE_API_KEY') or os.getenv('GEMINI_API_KEY')
+GEMINI_MODEL=os.getenv('GEMINI_MODEL') or 'gemini-3.5-flash-lite'
 class Utils:
 
     def __init__(self):
-        self.model=OpenAIEmbeddings(
-        openai_api_key=openai.api_key,
-        model='text-embedding-ada-002')
+        self.model=GoogleGenerativeAIEmbeddings(
+        google_api_key=google_api_key,
+        model='gemini-embedding-2-preview')
+        self.llm=ChatGoogleGenerativeAI(model=GEMINI_MODEL,google_api_key=google_api_key)
         self.vectorStore=Chroma('langchain_store',self.model,persist_directory='./database')
         self.vectorStore.persist()
         
         
         
     def add_text(self,input):
-        splitter = ss(chunk_size=50,chunk_overlap=0)
-        input_splt=splitter.split_text(text=input)
         self.vectorStore.add_texts([input])
+
+    def add_document(self,text):
+        """Chunk a document and store its chunks in the vector database.
+        Returns the number of chunks added."""
+        splitter=RecursiveCharacterTextSplitter(chunk_size=500,chunk_overlap=50)
+        chunks=splitter.split_text(text)
+        if chunks:
+            self.vectorStore.add_texts(chunks)
+        return len(chunks)
 
     def findmatch(self,input):
         result=self.vectorStore.similarity_search(query=input)
@@ -36,20 +65,14 @@ class Utils:
             return response
 
     def query_refiner(self,conversation,query):
-        response=openai.Completion.create(
-            model='ada',
-            prompt=f"""###SYSTEM: Your an AI chatbot at a Ecommerce Website If anyThing asked other than ecommerce just say I dont know. Please give the answer based upon following text and your duty is to respond to user query. 
+        response=self.llm.invoke(
+            f"""###SYSTEM: You are a search-query rewriter for a document Q&A assistant. Using the conversation so far, rewrite the user's query as a concise standalone search query that captures their intent (resolve words like 'it', 'that', 'them' using the conversation). If there is no conversation, return the query unchanged. Output only the rewritten search query, nothing else.
             ###TEXT: {conversation} 
             ###USER:{query}?
-            ###RESPONSE: """,
-            temperature=0.2,
-            max_tokens=1024,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0,
-            stop=['?']
+            ###RESPONSE: """
         )
-        return response['choices'][0]['text']
+        refined=str(response.text).strip().strip('"')
+        return refined or query
 
     def get_conversation_string(self,requests, responses):
         conversation_string=""
