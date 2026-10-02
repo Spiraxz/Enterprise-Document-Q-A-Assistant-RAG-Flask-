@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 import styled from 'styled-components';
@@ -27,6 +27,17 @@ const ChatInput = styled.textarea`
   resize: none;
 `;
 
+const AttachButton = styled.button`
+  border: none;
+  border-right: 1px solid #ddd;
+  border-top: 1px solid #ddd;
+  background: #f7f7f7;
+  cursor: pointer;
+  padding: 0 12px;
+  font-size: 16px;
+  &:hover { background: #eee; }
+`;
+
 function Chatbot() {
 
   const [chatLog, setChatLog] = useState([{
@@ -43,6 +54,23 @@ useEffect(()=>{
 
 
   const [input,setInput]=useState("")
+  const fileInputRef=useRef(null)
+
+  const handleFileUpload=async (e)=>{
+    const file=e.target.files && e.target.files[0]
+    e.target.value=""
+    if(!file) return
+    const formData=new FormData()
+    formData.append('file',file)
+    try{
+      const response=await axios.post('http://localhost:5000/upload',formData)
+      setChatLog(log=>[...log,{ user: 'bot', message: response.data.message }])
+    }catch(err){
+      const msg=(err.response && err.response.data && err.response.data.message) || 'Upload failed.'
+      setChatLog(log=>[...log,{ user: 'bot', message: msg }])
+    }
+  }
+
   const handleKeyDown = async (e) => {
     if (e.keyCode === 13) {
       handleSubmit(e);
@@ -89,10 +117,26 @@ useEffect(()=>{
       <form 
       style={{
         width:"100%",
-        flexDirection:"column"
+        height:"10%",
+        display:"flex",
+        flexDirection:"row",
+        alignItems:"stretch"
       }}>
+        <input
+          type="file"
+          ref={fileInputRef}
+          style={{display:"none"}}
+          accept=".txt,.md,.pdf,.docx"
+          onChange={handleFileUpload}
+        />
+        <AttachButton type="button" title="Add a document (.txt, .md, .pdf, .docx)" onClick={()=>fileInputRef.current && fileInputRef.current.click()}>
+          📎
+        </AttachButton>
         <ChatInput placeholder="Ask me anything..." style={{
             resize:"none",
+            flex:1,
+            width:"auto",
+            height:"100%"
         }}
         value={input}
         onChange={(e)=>setInput(e.target.value)}
